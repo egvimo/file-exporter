@@ -9,6 +9,7 @@
 *.yaml                text
 *.json                text
 *.py                  text
+*.go                 -text diff=golang
 
 *.{cmd,[cC][mM][dD]}  text eol=crlf
 *.{bat,[bB][aA][tT]}  text eol=crlf
