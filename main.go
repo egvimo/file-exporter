@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,8 +11,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-type config struct {
-	Files []string
+type arrayFlag []string
+
+func (i *arrayFlag) String() string {
+	return fmt.Sprintf("%v", *i)
+}
+
+func (i *arrayFlag) Set(value string) error {
+	*i = append(*i, value)
+	return nil
 }
 
 type fileMetric struct {
@@ -61,29 +68,20 @@ func (collector *fileCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func main() {
-	var (
-		conf = flag.String("config", "/etc/exporter/config.json", "Path to the config.")
-		addr = flag.String("listen-address", ":8080", "The address to listen on for HTTP requests.")
-	)
+	var files arrayFlag
+	var addr = flag.String("listen-address", ":8080", "The address to listen on for HTTP requests.")
+	flag.Var(&files, "file", "File to export metric for.")
 
 	flag.Parse()
 
-	configBytes, err := os.ReadFile(*conf)
-	if err != nil {
-		log.Fatal(err)
+	if len(files) == 0 {
+		log.Fatal("No files provided")
 		return
 	}
 
-	var config config
-	err = json.Unmarshal(configBytes, &config)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
+	log.Printf("Initializing exporter for files: %v", files)
 
-	log.Printf("Initializing exporter for files: %v", config.Files)
-
-	fileCollector := newFileCollector(config.Files)
+	fileCollector := newFileCollector(files)
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(fileCollector)
