@@ -11,6 +11,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+type FileSystemChecker interface {
+	FileExists(string) bool
+}
+
+type OSFileSystem struct{}
+
+func (OSFileSystem) FileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 type arrayFlag []string
 
 func (i *arrayFlag) String() string {
@@ -29,9 +40,10 @@ type fileMetric struct {
 
 type fileCollector struct {
 	fileMetrics []fileMetric
+	fsChecker   FileSystemChecker
 }
 
-func newFileCollector(files []string) *fileCollector {
+func NewFileCollector(files []string, fsChecker FileSystemChecker) *fileCollector {
 	fileMetrics := make([]fileMetric, 0, len(files))
 
 	for _, file := range files {
@@ -46,6 +58,7 @@ func newFileCollector(files []string) *fileCollector {
 
 	return &fileCollector{
 		fileMetrics: fileMetrics,
+		fsChecker:   fsChecker,
 	}
 }
 
@@ -57,14 +70,29 @@ func (collector *fileCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (collector *fileCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, fileMetric := range collector.fileMetrics {
-		var metricValue float64
-		if _, err := os.Stat(fileMetric.file); err == nil {
-			metricValue = 1
-		} else {
-			metricValue = 0
+		metricValue := 0.0
+		if collector.fsChecker.FileExists(fileMetric.file) {
+			metricValue = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(fileMetric.metric, prometheus.GaugeValue, metricValue)
 	}
+}
+
+func StartMetricsServer(addr string, files []string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("No files provided")
+	}
+
+	log.Printf("Initializing exporter for files: %v", files)
+
+	fileCollector := NewFileCollector(files, OSFileSystem{})
+
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(fileCollector)
+
+	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	log.Printf("Serving on %s", addr)
+	return http.ListenAndServe(addr, nil)
 }
 
 func main() {
@@ -74,20 +102,7 @@ func main() {
 
 	flag.Parse()
 
-	if len(files) == 0 {
-		log.Fatal("No files provided")
-		return
+	if err := StartMetricsServer(*addr, files); err != nil {
+		log.Fatal(err)
 	}
-
-	log.Printf("Initializing exporter for files: %v", files)
-
-	fileCollector := newFileCollector(files)
-
-	reg := prometheus.NewRegistry()
-	reg.MustRegister(fileCollector)
-
-	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{EnableOpenMetrics: false}))
-
-	log.Printf("Serving on %s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, nil))
 }
